@@ -46,10 +46,6 @@ export { paymentBalanceProvider } from "./providers/payment-balance";
 export { formatUsd, truncateAddress, usdToBaseUnits, ONE_DAY_MS } from "./utils";
 export type * from "./types";
 
-// ---------------------------------------------------------------------------
-// Route handlers
-// ---------------------------------------------------------------------------
-
 /** GET /x402/summary — Return 24h payment summary as JSON */
 async function handleSummary(
   _req: RouteRequest,
@@ -156,10 +152,6 @@ function escapeCSV(value: string): string {
   return value;
 }
 
-// ---------------------------------------------------------------------------
-// Plugin definition
-// ---------------------------------------------------------------------------
-
 export const x402Plugin: Plugin = {
   name: "x402",
   description:
@@ -173,14 +165,6 @@ export const x402Plugin: Plugin = {
     X402_MAX_PAYMENT_USD: null,
     X402_MAX_TOTAL_USD: null,
     X402_ENABLED: null,
-  },
-
-  init: async (
-    _config: Record<string, string>,
-    _runtime: IAgentRuntime,
-  ): Promise<void> => {
-    // Service initialization is handled by the Service.start() factory.
-    // This init hook is available for additional setup if needed.
   },
 
   services: [X402Service],

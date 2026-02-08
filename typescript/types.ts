@@ -16,8 +16,9 @@ export interface NetworkInfo {
   usdcDomainName: string;
   /** USDC ERC-2612 permit version string (typically "2") */
   usdcPermitVersion: string;
+  /** Default RPC URL for this network (used for nonce queries) */
+  rpcUrl: string;
 }
-
 
 // Payment records & directions
 

@@ -1,6 +1,6 @@
 /** EVM payment signer using viem. Produces "upto" scheme payloads with ERC-2612 Permit. */
 
-import { type Hex } from "viem";
+import { type Hex, createPublicClient, http, type PublicClient } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { resolveNetwork } from "../networks";
 import type {
@@ -77,6 +77,26 @@ export class EvmPaymentSigner implements PaymentSigner {
     return { v, r, s };
   }
 
+  /** Query the USDC contract's nonces(owner) on-chain via RPC. */
+  private async queryOnChainNonce(usdcAddress: Hex, rpcUrl: string, chainId: number): Promise<bigint> {
+    const client = createPublicClient({
+      transport: http(rpcUrl),
+    });
+    const result = await client.readContract({
+      address: usdcAddress,
+      abi: [{
+        inputs: [{ name: "owner", type: "address" }],
+        name: "nonces",
+        outputs: [{ name: "", type: "uint256" }],
+        stateMutability: "view",
+        type: "function",
+      }],
+      functionName: "nonces",
+      args: [this.account.address],
+    }) as bigint;
+    return result;
+  }
+
   /**
    * Build a base64-encoded x402 v2 payment header using "upto" scheme (ERC-2612 Permit).
    *
@@ -86,9 +106,8 @@ export class EvmPaymentSigner implements PaymentSigner {
    * - name and version come from requirement.extra
    * - nonce is the USDC contract's sequential nonce (from requirement.extra or default 0)
    *
-   * NOTE: For production use, the caller should query the USDC contract's
-   * nonces(owner) function and pass the result via requirement.extra.nonce.
-   * The default of 0 works for fresh wallets that have never used permit.
+   * If requirement.extra.nonce is not provided, the signer queries
+   * USDC.nonces(owner) on-chain automatically via RPC.
    */
   async buildPaymentHeader(
     requirement: PaymentRequirement,
@@ -103,8 +122,13 @@ export class EvmPaymentSigner implements PaymentSigner {
       requirement.extra?.version ?? networkInfo.usdcPermitVersion;
 
     // Sequential nonce from the USDC contract's nonces(owner) mapping.
-    // Defaults to 0 for wallets that have never used permit on this token.
-    const nonce = BigInt(requirement.extra?.nonce ?? "0");
+    // Query on-chain if not provided in requirement.extra.
+    let nonce: bigint;
+    if (requirement.extra?.nonce !== undefined) {
+      nonce = BigInt(requirement.extra.nonce);
+    } else {
+      nonce = await this.queryOnChainNonce(requirement.asset as Hex, networkInfo.rpcUrl, networkInfo.chainId);
+    }
 
     // Deadline for the Permit (Unix timestamp)
     const deadline = BigInt(

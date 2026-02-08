@@ -178,8 +178,8 @@ export class SqlitePaymentStorage implements PaymentStorage {
     let metadata: Record<string, string> = {};
     try {
       metadata = JSON.parse(row.metadata) as Record<string, string>;
-    } catch {
-      // Ignore malformed metadata
+    } catch (_metadataParseError) {
+      // Non-critical: metadata is optional display data
     }
 
     return {
