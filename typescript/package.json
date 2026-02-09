@@ -60,5 +60,63 @@
     "platformDetails": {
       "node": "Default export (Node.js)"
     }
+  },
+  "agentConfig": {
+    "pluginParameters": {
+      "X402_AGENT_URL": {
+        "type": "string",
+        "description": "Agent endpoint URL",
+        "required": false,
+        "sensitive": false
+      },
+      "X402_PRIVATE_KEY": {
+        "type": "string",
+        "description": "Private key for X402",
+        "required": true,
+        "sensitive": true
+      },
+      "X402_NETWORK": {
+        "type": "string",
+        "description": "Network name (e.g. mainnet, testnet)",
+        "required": false,
+        "sensitive": false
+      },
+      "X402_PAY_TO": {
+        "type": "string",
+        "description": "Payment recipient address",
+        "required": false,
+        "sensitive": false
+      },
+      "X402_FACILITATOR_URL": {
+        "type": "string",
+        "description": "Facilitator service URL",
+        "required": false,
+        "sensitive": false
+      },
+      "X402_MAX_PAYMENT_USD": {
+        "type": "number",
+        "description": "Maximum single payment in USD",
+        "required": false,
+        "sensitive": false
+      },
+      "X402_MAX_TOTAL_USD": {
+        "type": "number",
+        "description": "Maximum total spend in USD",
+        "required": false,
+        "sensitive": false
+      },
+      "X402_ENABLED": {
+        "type": "boolean",
+        "description": "Enable or disable this feature",
+        "required": false,
+        "sensitive": false
+      },
+      "X402_DB_PATH": {
+        "type": "string",
+        "description": "Database file path",
+        "required": false,
+        "sensitive": false
+      }
+    }
   }
 }
