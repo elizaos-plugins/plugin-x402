@@ -74,10 +74,40 @@ export const setPaymentPolicyAction: Action = {
     },
   ],
 
-  validate: async (runtime: IAgentRuntime): Promise<boolean> => {
+        validate: async (runtime: any, message: any, state?: any, options?: any): Promise<boolean> => {
+    	const __avTextRaw = typeof message?.content?.text === 'string' ? message.content.text : '';
+    	const __avText = __avTextRaw.toLowerCase();
+    	const __avKeywords = ['set', 'payment', 'policy'];
+    	const __avKeywordOk =
+    		__avKeywords.length > 0 &&
+    		__avKeywords.some((kw) => kw.length > 0 && __avText.includes(kw));
+    	const __avRegex = new RegExp('\\b(?:set|payment|policy)\\b', 'i');
+    	const __avRegexOk = __avRegex.test(__avText);
+    	const __avSource = String(message?.content?.source ?? message?.source ?? '');
+    	const __avExpectedSource = '';
+    	const __avSourceOk = __avExpectedSource
+    		? __avSource === __avExpectedSource
+    		: Boolean(__avSource || state || runtime?.agentId || runtime?.getService);
+    	const __avOptions = options && typeof options === 'object' ? options : {};
+    	const __avInputOk =
+    		__avText.trim().length > 0 ||
+    		Object.keys(__avOptions as Record<string, unknown>).length > 0 ||
+    		Boolean(message?.content && typeof message.content === 'object');
+
+    	if (!(__avKeywordOk && __avRegexOk && __avSourceOk && __avInputOk)) {
+    		return false;
+    	}
+
+    	const __avLegacyValidate = async (runtime: IAgentRuntime): Promise<boolean> => {
     const service = runtime.getService<X402Service>("x402_payment");
     return !!service && service.isActive();
-  },
+  };
+    	try {
+    		return Boolean(await (__avLegacyValidate as any)(runtime, message, state, options));
+    	} catch {
+    		return false;
+    	}
+    },
 
   handler: async (
     runtime: IAgentRuntime,
