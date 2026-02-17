@@ -15,7 +15,6 @@ import {
   verifyPaymentWithFacilitator,
 } from "./facilitator-client";
 
-
 export function createPaywallMiddleware(
   config: PaywallConfig,
   storage?: PaymentStorage,

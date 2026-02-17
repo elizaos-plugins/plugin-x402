@@ -1058,8 +1058,8 @@ describe("EvmPaymentSigner", () => {
     expect(decoded.payload.authorization.from).toBe(EXPECTED_ADDRESS);
     expect(decoded.payload.authorization.to).toBe("0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
     expect(decoded.payload.authorization.value).toBe("1000000");
-    // "upto" scheme uses sequential nonce (default "0"), not random bytes32
-    expect(decoded.payload.authorization.nonce).toBe("0");
+    // "upto" scheme uses sequential nonce queried from chain (or from extra)
+    expect(Number(decoded.payload.authorization.nonce)).toBeGreaterThanOrEqual(0);
     // validBefore is the Permit deadline
     expect(decoded.payload.authorization.validBefore).toBeTruthy();
     // validAfter is not used in the "upto" Permit scheme
@@ -1110,8 +1110,8 @@ describe("EvmPaymentSigner", () => {
     const header = await signer.buildPaymentHeader(requirement);
     const decoded = JSON.parse(Buffer.from(header, "base64").toString("utf-8"));
 
-    // Should default to "0"
-    expect(decoded.payload.authorization.nonce).toBe("0");
+    // Should query on-chain nonce when not in extra
+    expect(Number(decoded.payload.authorization.nonce)).toBeGreaterThanOrEqual(0);
   });
 
   it("should read name and version from requirement.extra for domain", async () => {
@@ -1145,5 +1145,466 @@ describe("EvmPaymentSigner", () => {
 
     // Different domain => different signatures
     expect(decoded1.payload.signature).not.toBe(decoded2.payload.signature);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UTILS
+// ---------------------------------------------------------------------------
+
+describe("Utils", () => {
+  it("formatUsd should format base units to dollars", async () => {
+    const { formatUsd } = await import("../utils");
+    expect(formatUsd(0n)).toBe("$0.00");
+    expect(formatUsd(1n)).toBe("$0.00");           // rounds
+    expect(formatUsd(1000000n)).toBe("$1.00");
+    expect(formatUsd(10000000n)).toBe("$10.00");
+    expect(formatUsd(999999n)).toBe("$1.00");       // rounds to nearest cent
+    expect(formatUsd(50000n)).toBe("$0.05");
+    expect(formatUsd(123456789n)).toBe("$123.46");  // truncates
+  });
+
+  it("truncateAddress should shorten addresses", async () => {
+    const { truncateAddress } = await import("../utils");
+    expect(truncateAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")).toBe("0xf39F...2266");
+    expect(truncateAddress("short")).toBe("short");  // <= 10 chars returned as-is
+    expect(truncateAddress("")).toBe("");
+  });
+
+  it("usdToBaseUnits should convert dollars to 6-decimal base units", async () => {
+    const { usdToBaseUnits } = await import("../utils");
+    expect(usdToBaseUnits(1.0)).toBe(1000000n);
+    expect(usdToBaseUnits(0.01)).toBe(10000n);
+    expect(usdToBaseUnits(0)).toBe(0n);
+    expect(usdToBaseUnits(100.50)).toBe(100500000n);
+    expect(usdToBaseUnits(0.000001)).toBe(1n);    // smallest representable
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SQLITE STORAGE (real database, temp file)
+// ---------------------------------------------------------------------------
+
+describe("SqlitePaymentStorage", () => {
+  let storage: InstanceType<typeof import("../storage/sqlite").SqlitePaymentStorage>;
+  const tmpPath = "/tmp/x402-test-" + Date.now() + ".db";
+
+  beforeEach(async () => {
+    const { SqlitePaymentStorage } = await import("../storage/sqlite");
+    storage = new SqlitePaymentStorage(tmpPath);
+  });
+
+  afterEach(async () => {
+    storage.close();
+    const fs = await import("fs");
+    fs.unlinkSync(tmpPath);
+  });
+
+  it("should create table and record a payment", async () => {
+    await storage.recordPayment({
+      id: "test-1", direction: "outgoing", counterparty: "0xAAA",
+      amount: 500000n, network: "eip155:8453", txHash: "0x123",
+      resource: "https://api.test", status: "confirmed",
+      createdAt: new Date().toISOString(), metadata: { key: "val" },
+    });
+    const records = await storage.getRecords();
+    expect(records).toHaveLength(1);
+    expect(records[0].id).toBe("test-1");
+    expect(records[0].amount).toBe(500000n);  // BigInt survives round-trip
+    expect(records[0].metadata).toEqual({ key: "val" });
+  });
+
+  it("should compute totals correctly", async () => {
+    await storage.recordPayment({
+      id: "a", direction: "outgoing", counterparty: "0xA", amount: 100n,
+      network: "n", txHash: "", resource: "", status: "confirmed",
+      createdAt: new Date().toISOString(), metadata: {},
+    });
+    await storage.recordPayment({
+      id: "b", direction: "outgoing", counterparty: "0xB", amount: 200n,
+      network: "n", txHash: "", resource: "", status: "confirmed",
+      createdAt: new Date().toISOString(), metadata: {},
+    });
+    await storage.recordPayment({
+      id: "c", direction: "outgoing", counterparty: "0xC", amount: 300n,
+      network: "n", txHash: "", resource: "", status: "failed",
+      createdAt: new Date().toISOString(), metadata: {},
+    });
+    expect(await storage.getTotal("outgoing")).toBe(300n); // excludes failed
+    expect(await storage.getCount("outgoing")).toBe(2);
+  });
+
+  it("should filter by time window", async () => {
+    await storage.recordPayment({
+      id: "old", direction: "outgoing", counterparty: "0xA", amount: 100n,
+      network: "n", txHash: "", resource: "", status: "confirmed",
+      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), metadata: {},
+    });
+    await storage.recordPayment({
+      id: "new", direction: "outgoing", counterparty: "0xA", amount: 200n,
+      network: "n", txHash: "", resource: "", status: "confirmed",
+      createdAt: new Date().toISOString(), metadata: {},
+    });
+    expect(await storage.getTotal("outgoing", 60 * 60 * 1000)).toBe(200n);
+  });
+
+  it("should clear all records", async () => {
+    await storage.recordPayment({
+      id: "x", direction: "outgoing", counterparty: "0xA", amount: 100n,
+      network: "n", txHash: "", resource: "", status: "confirmed",
+      createdAt: new Date().toISOString(), metadata: {},
+    });
+    await storage.clear();
+    expect(await storage.getRecords()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PAYWALL MIDDLEWARE
+// ---------------------------------------------------------------------------
+
+describe("createPaywallMiddleware", () => {
+  it("should return 402 when no X-PAYMENT header", async () => {
+    const { createPaywallMiddleware } = await import("../middleware/paywall");
+    const paywall = createPaywallMiddleware({
+      payTo: "0xPAYEE", network: "base-sepolia",
+      facilitatorUrl: "http://localhost:9999",
+      amount: 100000n, description: "test", mimeType: "application/json",
+      maxTimeoutSeconds: 300,
+    });
+
+    let statusCode = 0;
+    let jsonBody: Record<string, unknown> = {};
+    const headers: Record<string, string> = {};
+    const res = {
+      status: (code: number) => { statusCode = code; return res; },
+      json: (data: Record<string, unknown>) => { jsonBody = data; return res; },
+      setHeader: (k: string, v: string) => { headers[k] = v; return res; },
+      end: () => res,
+    };
+
+    let nextCalled = false;
+    await paywall({ headers: {}, url: "/test" }, res as never, () => { nextCalled = true; });
+
+    expect(statusCode).toBe(402);
+    expect(jsonBody.error).toBe("Payment Required");
+    expect(headers["Payment-Required"]).toBeTruthy();
+    expect(nextCalled).toBe(false);
+
+    // Verify the Payment-Required header decodes to valid x402 v2
+    const decoded = JSON.parse(Buffer.from(headers["Payment-Required"], "base64").toString());
+    expect(decoded.x402Version).toBe(2);
+    expect(decoded.accepts).toHaveLength(1);
+    expect(decoded.accepts[0].scheme).toBe("upto");
+    expect(decoded.accepts[0].maxAmountRequired).toBe("100000");
+    expect(decoded.accepts[0].payTo).toBe("0xPAYEE");
+    expect(decoded.accepts[0].extra.name).toBeTruthy();  // domain name included
+    expect(decoded.accepts[0].extra.version).toBeTruthy();
+  });
+
+  it("should return 402 when payment verification fails", async () => {
+    const { createPaywallMiddleware } = await import("../middleware/paywall");
+    const paywall = createPaywallMiddleware({
+      payTo: "0xPAYEE", network: "base-sepolia",
+      facilitatorUrl: "http://localhost:1",  // unreachable
+      amount: 100000n, description: "test", mimeType: "application/json",
+      maxTimeoutSeconds: 300,
+    });
+
+    let statusCode = 0;
+    let jsonBody: Record<string, unknown> = {};
+    const res = {
+      status: (code: number) => { statusCode = code; return res; },
+      json: (data: Record<string, unknown>) => { jsonBody = data; return res; },
+      setHeader: (_k: string, _v: string) => res,
+      end: () => res,
+    };
+
+    await paywall(
+      { headers: { "x-payment": "invalid-base64-garbage" }, url: "/test" },
+      res as never,
+      () => {},
+    );
+
+    expect(statusCode).toBe(402);
+    expect(jsonBody.error).toContain("Payment Invalid");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FACILITATOR CLIENT — request body construction
+// ---------------------------------------------------------------------------
+
+describe("Facilitator Client", () => {
+  it("buildFacilitatorRequestBody should decode base64 proof and build correct body", async () => {
+    const mod = await import("../middleware/facilitator-client");
+    // Test via verifyPaymentWithFacilitator with a mock server
+    // The function internally calls buildFacilitatorRequestBody, which we can
+    // verify by checking what it sends
+
+    // Build a base64 payment proof
+    const proof = { x402Version: 2, accepted: { scheme: "upto" }, payload: { signature: "0x", authorization: {} } };
+    const encoded = Buffer.from(JSON.stringify(proof)).toString("base64");
+
+    const requirement = {
+      scheme: "upto", network: "eip155:84532", maxAmountRequired: "1000",
+      resource: "test", description: "t", mimeType: "application/json",
+      payTo: "0xAAA", maxTimeoutSeconds: 300, asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+      extra: { name: "USDC", version: "2" },
+    };
+
+    // Call verify against a non-existent server — it will fail with a network error
+    // but we can verify the function handles it correctly
+    const result = await mod.verifyPaymentWithFacilitator(encoded, "http://127.0.0.1:1", requirement);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("Facilitator request failed");
+  });
+
+  it("should handle non-base64 direct JSON proof", async () => {
+    const mod = await import("../middleware/facilitator-client");
+    const proof = JSON.stringify({ x402Version: 2, accepted: {}, payload: {} });
+    const result = await mod.verifyPaymentWithFacilitator(proof, "http://127.0.0.1:1", {
+      scheme: "upto", network: "eip155:84532", maxAmountRequired: "1000",
+      resource: "test", description: "t", mimeType: "application/json",
+      payTo: "0xAAA", maxTimeoutSeconds: 300, asset: "0x036",
+      extra: {},
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("failed");
+  });
+
+  it("should throw on completely invalid proof", async () => {
+    const mod = await import("../middleware/facilitator-client");
+    // Neither base64 nor JSON
+    const result = await mod.verifyPaymentWithFacilitator("not-json-not-base64!!!", "http://127.0.0.1:1", {
+      scheme: "upto", network: "eip155:84532", maxAmountRequired: "1000",
+      resource: "test", description: "t", mimeType: "application/json",
+      payTo: "0xAAA", maxTimeoutSeconds: 300, asset: "0x036",
+      extra: {},
+    });
+    // Should fail gracefully, not throw
+    expect(result.valid).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FETCH WITH PAYMENT — full flow with real signer
+// ---------------------------------------------------------------------------
+
+describe("createFetchWithPayment - full flow", () => {
+  it("should sign and retry on 402, record payment", async () => {
+    const { EvmPaymentSigner } = await import("../client/signer");
+    const { createFetchWithPayment } = await import("../client/fetch-with-payment");
+    const { PolicyEngine } = await import("../policy/engine");
+    const { CircuitBreaker } = await import("../policy/circuit-breaker");
+    const { MemoryPaymentStorage } = await import("../storage/memory");
+
+    const storage = new MemoryPaymentStorage();
+    const signer = new EvmPaymentSigner(
+      "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+      "base-sepolia",
+    );
+    const policy = new PolicyEngine({
+      outgoing: { maxPerTransaction: 10000000n, maxTotal: 100000000n, windowMs: 86400000, maxTransactions: 100, allowedRecipients: [], blockedRecipients: [] },
+      incoming: { minPerTransaction: 0n, allowedSenders: [], blockedSenders: [] },
+    }, storage);
+    const breaker = new CircuitBreaker();
+
+    // Mock 402 response with proper headers
+    const paymentRequired = {
+      x402Version: 2,
+      accepts: [{
+        scheme: "upto", network: "eip155:84532",
+        maxAmountRequired: "50000", resource: "https://api.test/data",
+        description: "test", mimeType: "application/json",
+        payTo: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+        maxTimeoutSeconds: 300,
+        asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        extra: { name: "USDC", version: "2", nonce: "6" },
+      }],
+    };
+    const encoded = Buffer.from(JSON.stringify(paymentRequired)).toString("base64");
+
+    let callCount = 0;
+    let capturedPaymentHeader = "";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      callCount++;
+      if (callCount === 1) {
+        return new Response("{}", { status: 402, headers: { "Payment-Required": encoded } });
+      }
+      // Capture and validate the payment header
+      const h = init?.headers;
+      capturedPaymentHeader = h instanceof Headers ? (h.get("X-PAYMENT") ?? "") : ((h as Record<string, string>)?.["X-PAYMENT"] ?? "");
+      return new Response(JSON.stringify({ data: "ok" }), { status: 200, headers: { "x-upto-session-id": "session-123" } });
+    }) as typeof fetch;
+
+    try {
+      const fetchWithPayment = createFetchWithPayment({
+        signer, policyEngine: policy, circuitBreaker: breaker, storage,
+        logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+      });
+
+      const resp = await fetchWithPayment("https://api.test/data");
+      expect(resp.status).toBe(200);
+      expect(callCount).toBe(2);
+
+      // Verify the payment header was a valid x402 payload
+      const decoded = JSON.parse(Buffer.from(capturedPaymentHeader, "base64").toString());
+      expect(decoded.x402Version).toBe(2);
+      expect(decoded.accepted.scheme).toBe("upto");
+      expect(decoded.payload.authorization.from).toBe(signer.address);
+      expect(decoded.payload.authorization.nonce).toBe("6"); // from extra
+      expect(decoded.payload.signature).toMatch(/^0x/);
+
+      // Verify payment was recorded in storage
+      const records = await storage.getRecords();
+      expect(records).toHaveLength(1);
+      expect(records[0].direction).toBe("outgoing");
+      expect(records[0].amount).toBe(50000n);
+      expect(records[0].counterparty).toBe("0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
+      expect(records[0].status).toBe("confirmed");
+      expect(records[0].txHash).toBe("session-123"); // from x-upto-session-id header
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("should block payment when policy denies", async () => {
+    const { EvmPaymentSigner } = await import("../client/signer");
+    const { createFetchWithPayment } = await import("../client/fetch-with-payment");
+    const { PolicyEngine } = await import("../policy/engine");
+    const { CircuitBreaker } = await import("../policy/circuit-breaker");
+    const { MemoryPaymentStorage } = await import("../storage/memory");
+
+    const storage = new MemoryPaymentStorage();
+    const signer = new EvmPaymentSigner("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "base-sepolia");
+    const policy = new PolicyEngine({
+      outgoing: { maxPerTransaction: 10000n, maxTotal: 100000n, windowMs: 86400000, maxTransactions: 100, allowedRecipients: [], blockedRecipients: [] },
+      incoming: { minPerTransaction: 0n, allowedSenders: [], blockedSenders: [] },
+    }, storage);
+
+    const paymentRequired = {
+      x402Version: 2,
+      accepts: [{
+        scheme: "upto", network: "eip155:84532",
+        maxAmountRequired: "50000", // $0.05 — exceeds $0.01 per-tx limit
+        resource: "https://api.test", description: "test", mimeType: "application/json",
+        payTo: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", maxTimeoutSeconds: 300,
+        asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", extra: { nonce: "0" },
+      }],
+    };
+
+    let callCount = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      callCount++;
+      return new Response("{}", { status: 402, headers: { "Payment-Required": Buffer.from(JSON.stringify(paymentRequired)).toString("base64") } });
+    }) as typeof fetch;
+
+    try {
+      const fetchWithPayment = createFetchWithPayment({
+        signer, policyEngine: policy, circuitBreaker: new CircuitBreaker(), storage,
+        logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+      });
+      const resp = await fetchWithPayment("https://api.test");
+      expect(resp.status).toBe(402); // returns original 402 — did NOT pay
+      expect(callCount).toBe(1);     // only 1 call — no retry
+      expect(await storage.getRecords()).toEqual([]); // nothing recorded
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("should block payment when circuit breaker is open", async () => {
+    const { EvmPaymentSigner } = await import("../client/signer");
+    const { createFetchWithPayment } = await import("../client/fetch-with-payment");
+    const { PolicyEngine } = await import("../policy/engine");
+    const { CircuitBreaker } = await import("../policy/circuit-breaker");
+    const { MemoryPaymentStorage } = await import("../storage/memory");
+
+    const storage = new MemoryPaymentStorage();
+    const signer = new EvmPaymentSigner("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "base-sepolia");
+    const breaker = new CircuitBreaker({ maxPaymentsPerMinute: 2, anomalyMultiplier: 100, cooldownMs: 60000, recentWindowSize: 10 });
+    // Trip the breaker
+    breaker.recordSuccess(1n);
+    breaker.recordSuccess(1n);
+    breaker.check(1n); // trips at 2/min
+
+    const paymentRequired = {
+      x402Version: 2,
+      accepts: [{
+        scheme: "upto", network: "eip155:84532", maxAmountRequired: "1000",
+        resource: "test", description: "t", mimeType: "application/json",
+        payTo: "0xAAA", maxTimeoutSeconds: 300,
+        asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", extra: { nonce: "0" },
+      }],
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      return new Response("{}", { status: 402, headers: { "Payment-Required": Buffer.from(JSON.stringify(paymentRequired)).toString("base64") } });
+    }) as typeof fetch;
+
+    try {
+      const fetchWithPayment = createFetchWithPayment({
+        signer, policyEngine: new PolicyEngine({ outgoing: { maxPerTransaction: 10000000n, maxTotal: 100000000n, windowMs: 86400000, maxTransactions: 1000, allowedRecipients: [], blockedRecipients: [] }, incoming: { minPerTransaction: 0n, allowedSenders: [], blockedSenders: [] } }, storage),
+        circuitBreaker: breaker, storage,
+        logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+      });
+      const resp = await fetchWithPayment("https://api.test");
+      expect(resp.status).toBe(402); // blocked by breaker
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CONCURRENT PAYMENTS
+// ---------------------------------------------------------------------------
+
+describe("Concurrent behavior", () => {
+  it("should handle multiple simultaneous payments independently", async () => {
+    const { MemoryPaymentStorage } = await import("../storage/memory");
+    const storage = new MemoryPaymentStorage();
+
+    // Simulate 10 concurrent recordPayment calls
+    const promises = Array.from({ length: 10 }, (_, i) =>
+      storage.recordPayment({
+        id: `concurrent-${i}`, direction: "outgoing",
+        counterparty: `0x${i.toString().padStart(40, "0")}`,
+        amount: BigInt(i * 1000), network: "eip155:8453",
+        txHash: `tx-${i}`, resource: `https://api.test/${i}`,
+        status: "confirmed", createdAt: new Date().toISOString(), metadata: {},
+      })
+    );
+    await Promise.all(promises);
+
+    const records = await storage.getRecords();
+    expect(records).toHaveLength(10);
+
+    const total = await storage.getTotal("outgoing");
+    // 0 + 1000 + 2000 + ... + 9000 = 45000
+    expect(total).toBe(45000n);
+  });
+
+  it("PolicyEngine should handle concurrent evaluations", async () => {
+    const { PolicyEngine } = await import("../policy/engine");
+    const { MemoryPaymentStorage } = await import("../storage/memory");
+    const storage = new MemoryPaymentStorage();
+    const engine = new PolicyEngine({
+      outgoing: { maxPerTransaction: 100000n, maxTotal: 500000n, windowMs: 86400000, maxTransactions: 100, allowedRecipients: [], blockedRecipients: [] },
+      incoming: { minPerTransaction: 0n, allowedSenders: [], blockedSenders: [] },
+    }, storage);
+
+    // Run 5 evaluations concurrently
+    const results = await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        engine.evaluateOutgoing({ amount: 50000n, recipient: `0x${i}`, resource: "test" })
+      )
+    );
+    // All should be allowed (total = 0, each is 50000 < 100000 per-tx)
+    expect(results.every(r => r.allowed)).toBe(true);
   });
 });

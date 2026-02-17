@@ -136,8 +136,8 @@ describe("x402 Payment E2E", () => {
   });
 
   // RPC-gated tests
-  const rpcUrl = process.env.BASE_SEPOLIA_RPC;
-  const describeRpc = rpcUrl ? describe : describe.skip;
+  const rpcUrl = process.env.BASE_SEPOLIA_RPC ?? "https://sepolia.base.org";
+  const describeRpc = describe; // Always run — public RPC is free
   describeRpc("On-chain (Base Sepolia)", () => {
     let pub: ReturnType<typeof createPublicClient>;
     beforeAll(() => { pub = createPublicClient({ chain: baseSepolia, transport: http(rpcUrl) }); });

@@ -2,7 +2,6 @@
 
 import type { FacilitatorVerifyResult, PaymentRequirement } from "../types";
 
-
 function buildFacilitatorRequestBody(
   paymentProof: string,
   requirement: PaymentRequirement,
@@ -35,7 +34,6 @@ function buildFacilitatorRequestBody(
 
   return JSON.stringify({ paymentPayload, paymentRequirements });
 }
-
 
 export async function verifyPaymentWithFacilitator(
   paymentProof: string,
@@ -82,7 +80,6 @@ export async function verifyPaymentWithFacilitator(
     };
   }
 }
-
 
 export async function settlePaymentWithFacilitator(
   paymentProof: string,

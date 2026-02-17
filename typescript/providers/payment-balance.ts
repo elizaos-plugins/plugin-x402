@@ -9,18 +9,18 @@ import type { IAgentRuntime, Memory, Provider, State } from "@elizaos/core";
 import { X402Service } from "../services/x402-service";
 
 import { ONE_DAY_MS, formatUsd, truncateAddress } from "../utils";
-
 export const paymentBalanceProvider: Provider = {
   name: "x402_payment_status",
   description:
     "Current x402 payment status including wallet, spending, and earning summary",
 
-  get: async (
+    dynamic: true,
+get: async (
     runtime: IAgentRuntime,
     _message: Memory,
     _state: State,
   ) => {
-    const service = runtime.getService<X402Service>("x402_payment");
+const service = runtime.getService<X402Service>("x402_payment");
 
     if (!service || !service.isActive()) {
       return {

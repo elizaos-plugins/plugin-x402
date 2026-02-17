@@ -219,8 +219,8 @@ export class PostgresPaymentStorage implements PaymentStorage {
         typeof row.metadata === "string"
           ? (JSON.parse(row.metadata as unknown as string) as Record<string, string>)
           : (row.metadata as Record<string, string>);
-    } catch {
-      // Ignore malformed metadata
+    } catch (_metadataParseError) {
+      // Non-critical: metadata is optional display data
     }
 
     return {

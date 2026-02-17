@@ -18,6 +18,7 @@ export const NETWORK_REGISTRY: Record<string, NetworkInfo> = {
     usdcAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     usdcDomainName: "USDC",
     usdcPermitVersion: "2",
+    rpcUrl: "https://mainnet.base.org",
   },
   "base-sepolia": {
     caip2: "eip155:84532",
@@ -26,6 +27,7 @@ export const NETWORK_REGISTRY: Record<string, NetworkInfo> = {
     usdcAddress: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
     usdcDomainName: "USDC",
     usdcPermitVersion: "2",
+    rpcUrl: "https://sepolia.base.org",
   },
   ethereum: {
     caip2: "eip155:1",
@@ -34,6 +36,7 @@ export const NETWORK_REGISTRY: Record<string, NetworkInfo> = {
     usdcAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     usdcDomainName: "USD Coin",
     usdcPermitVersion: "2",
+    rpcUrl: "https://cloudflare-eth.com",
   },
   sepolia: {
     caip2: "eip155:11155111",
@@ -42,6 +45,7 @@ export const NETWORK_REGISTRY: Record<string, NetworkInfo> = {
     usdcAddress: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
     usdcDomainName: "USDC",
     usdcPermitVersion: "2",
+    rpcUrl: "https://rpc.sepolia.org",
   },
 } as const;
 

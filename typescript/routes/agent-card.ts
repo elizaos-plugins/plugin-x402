@@ -5,6 +5,7 @@
  * wallet address, network, and available paid skills/routes.
  */
 
+import { logger } from "@elizaos/core";
 import type {
   IAgentRuntime,
   Route,
@@ -63,8 +64,11 @@ async function handleAgentCard(
   try {
     const networkInfo = resolveNetwork(networkKey);
     caip2Network = networkInfo.caip2;
-  } catch {
+  } catch (err) {
+    // Unknown network key — use it as-is (may be a CAIP-2 ID already)
     caip2Network = networkKey;
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn("[x402] Agent card: could not resolve network '" + networkKey + "': " + msg);
   }
 
   // Extract agent name and description from runtime character

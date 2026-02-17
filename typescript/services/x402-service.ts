@@ -195,18 +195,11 @@ export class X402Service extends Service {
     );
   }
 
-  /**
-   * Stop the service.
-   */
   async stop(): Promise<void> {
     logger.info("[x402] Service stopping");
     this.signer = null;
     this.fetchWithPayment = null;
   }
-
-  // ---------------------------------------------------------------------------
-  // Public API
-  // ---------------------------------------------------------------------------
 
   /**
    * Get a fetch function that automatically handles 402 Payment Required.
@@ -249,23 +242,14 @@ export class X402Service extends Service {
     return this.storage.getRecords({ limit });
   }
 
-  /**
-   * Check if the service is active (configured and enabled).
-   */
   isActive(): boolean {
     return this.serviceConfig.enabled && this.signer !== null;
   }
 
-  /**
-   * Check if the agent can make outgoing payments.
-   */
   canMakePayments(): boolean {
     return this.isActive() && this.fetchWithPayment !== null;
   }
 
-  /**
-   * Update the payment policy.
-   */
   updatePolicy(policy: Partial<PaymentPolicy>): void {
     if (this.policyEngine) {
       this.policyEngine.updatePolicy(policy);
@@ -273,52 +257,30 @@ export class X402Service extends Service {
     }
   }
 
-  /**
-   * Get the wallet address, or null if not configured.
-   */
   getWalletAddress(): string | null {
     return this.signer?.address ?? null;
   }
 
-  /**
-   * Get the configured network key.
-   */
   getNetwork(): string {
     return this.serviceConfig.network;
   }
 
-  /**
-   * Get the configured facilitator URL.
-   */
   getFacilitatorUrl(): string {
     return this.serviceConfig.facilitatorUrl;
   }
 
-  /**
-   * Get the configured pay-to address.
-   */
   getPayToAddress(): string {
     return this.serviceConfig.payTo;
   }
 
-  /**
-   * Get the underlying storage instance.
-   * Useful for the paywall middleware to record incoming payments.
-   */
   getStorage(): PaymentStorage {
     return this.storage;
   }
 
-  /**
-   * Get the circuit breaker state.
-   */
   getCircuitBreakerState(): string {
     return this.circuitBreaker.getState();
   }
 
-  /**
-   * Reset the circuit breaker.
-   */
   resetCircuitBreaker(): void {
     this.circuitBreaker.reset();
     logger.info("[x402] Circuit breaker reset");
