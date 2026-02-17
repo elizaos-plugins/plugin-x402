@@ -1,5 +1,6 @@
 {
-  "name": "@elizaos/plugin-x402",
+  "name": "@elizaos/plugin-x402-root",
+  "private": true,
   "version": "2.0.0-alpha.1",
   "description": "x402 HTTP payment protocol plugin for ElizaOS - send and receive crypto payments",
   "type": "module",
