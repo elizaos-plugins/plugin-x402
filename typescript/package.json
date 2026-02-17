@@ -1,6 +1,6 @@
 {
   "name": "@elizaos/plugin-x402",
-  "version": "2.0.0-alpha.5",
+  "version": "2.0.0-alpha.6",
   "description": "x402 HTTP payment protocol plugin for ElizaOS - send and receive crypto payments",
   "type": "module",
   "main": "dist/index.js",
